@@ -113,14 +113,16 @@ class Pipe:
             return []
 
     def _is_llm_endpoint(self, endpoint: Dict[str, Any]) -> bool:
-        """Check if an endpoint is an LLM by looking at task field or endpoint_type."""
-        # Check if endpoint_type is FOUNDATION_MODEL_API
-        if endpoint.get("endpoint_type") == "FOUNDATION_MODEL_API":
-            return True
-
-        # Check if task contains 'llm' or 'agent' at endpoint level
+        """Check if an endpoint matches the allowed LLM endpoint paths."""
+        allowed_paths = [
+            "agent/v1/chat",
+            "agent/v1/responses",
+            "agent/v2/chat",
+            "llm/v1/chat",
+            "llm/v1/completions",
+        ]
         task = endpoint.get("task", "").lower()
-        return "llm" in task or "agent" in task
+        return task in allowed_paths
 
     def _discover_models(self) -> List[Dict[str, str]]:
         """Auto-discover available LLM serving endpoints from Databricks."""
