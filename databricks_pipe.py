@@ -1,12 +1,12 @@
 """
 Title: Databricks LLM Pipe (Open WebUI)
-Version: 0.1.0
 """
 
 import requests
 import json
 import time
 import uuid
+import logging
 from typing import List, Union, Generator, Dict, Any
 from pydantic import BaseModel, Field
 
@@ -38,20 +38,9 @@ class Pipe:
 
     # No constants needed for simplified approach
 
-    # Fallback models if auto-discovery fails and no custom models provided
-    DEFAULT_MODELS = [
-        {
-            "id": "databricks-meta-llama-3-1-70b-instruct",
-            "name": "Meta Llama 3.1 70B Instruct",
-        },
-    ]
-
     def __init__(self):
         self.name = ""
         self.valves = self.Valves()
-        self._cached_models = None
-        self._cache_timestamp = 0
-        self._cache_duration = 300  # 5 minutes
 
     def _validate_config(self) -> Union[str, None]:
         """Validate configuration. Returns error message or None if valid."""
@@ -72,20 +61,55 @@ class Pipe:
 
     def _parse_custom_models(self) -> List[Dict[str, str]]:
         """Parse custom models from valves configuration."""
-        if not self.valves.custom_models.strip():
-            return []
-
         try:
-            custom_models = json.loads(self.valves.custom_models.strip())
-            if not isinstance(custom_models, list):
+            if not self.valves.custom_models.strip():
+                logging.debug("No custom models configured (empty string)")
                 return []
 
-            return [
-                {"id": str(model["id"]).strip(), "name": str(model["name"]).strip()}
-                for model in custom_models
-                if isinstance(model, dict) and "id" in model and "name" in model
-            ]
-        except json.JSONDecodeError:
+            logging.debug(
+                f"Parsing custom models from configuration: {self.valves.custom_models.strip()}"
+            )
+
+            custom_models = json.loads(self.valves.custom_models.strip())
+            logging.debug(f"Parsed JSON successfully, type: {type(custom_models)}")
+
+            if not isinstance(custom_models, list):
+                logging.warning(
+                    f"Custom models configuration is not a list, got {type(custom_models)}"
+                )
+                return []
+
+            valid_models = []
+            invalid_count = 0
+
+            for i, model in enumerate(custom_models):
+                if isinstance(model, dict) and "id" in model and "name" in model:
+                    valid_model = {
+                        "id": str(model["id"]).strip(),
+                        "name": str(model["name"]).strip(),
+                    }
+                    valid_models.append(valid_model)
+                    logging.debug(f"Valid custom model {i}: {valid_model}")
+                else:
+                    invalid_count += 1
+                    logging.warning(
+                        f"Invalid custom model {i}: {model} (missing 'id' or 'name' keys)"
+                    )
+
+            if invalid_count > 0:
+                logging.warning(f"Skipped {invalid_count} invalid custom model entries")
+
+            logging.info(f"Successfully parsed {len(valid_models)} custom models")
+            return valid_models
+
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse custom models JSON: {str(e)}")
+            logging.error(f"Invalid JSON string: {self.valves.custom_models}")
+            return []
+        except Exception as e:
+            logging.error(
+                f"Unexpected error parsing custom models: {str(e)}", exc_info=True
+            )
             return []
 
     def _is_llm_endpoint(self, endpoint: Dict[str, Any]) -> bool:
@@ -100,57 +124,145 @@ class Pipe:
 
     def _discover_models(self) -> List[Dict[str, str]]:
         """Auto-discover available LLM serving endpoints from Databricks."""
-        if not self.valves.auto_discover_models or self._validate_config():
-            return []
-
         try:
-            response = requests.get(
-                f"https://{self.valves.databricks_host.strip()}/api/2.0/serving-endpoints",
-                headers=self._get_headers(),
-                timeout=10,
+            # Check if auto-discovery is disabled
+            if not self.valves.auto_discover_models:
+                logging.info("Model auto-discovery is disabled in configuration")
+                return []
+
+            # Check configuration
+            config_error = self._validate_config()
+            if config_error:
+                logging.warning(f"Configuration validation failed: {config_error}")
+                return []
+
+            logging.info(
+                f"Starting model discovery for host: {self.valves.databricks_host.strip()}"
             )
+
+            url = f"https://{self.valves.databricks_host.strip()}/api/2.0/serving-endpoints"
+            headers = self._get_headers()
+
+            logging.debug(f"Making request to: {url}")
+            logging.debug(
+                f"Request headers: {dict(headers, Authorization='Bearer ***')}"
+            )  # Mask token
+
+            response = requests.get(url, headers=headers)
+            logging.info(f"API Response status: {response.status_code}")
+
             response.raise_for_status()
 
-            return [
-                {"id": endpoint["name"], "name": endpoint["name"]}
-                for endpoint in response.json().get("endpoints", [])
-                if endpoint.get("name")
-                and endpoint.get("state", {}).get("ready") == "READY"
-                and self._is_llm_endpoint(endpoint)
+            response_data = response.json()
+            all_endpoints = response_data.get("endpoints", [])
+            logging.info(f"Found {len(all_endpoints)} total endpoints")
+
+            if not all_endpoints:
+                logging.warning("No endpoints found in API response")
+                logging.debug(f"Full API response: {response_data}")
+                return []
+
+            # Filter endpoints step by step with logging
+            named_endpoints = [ep for ep in all_endpoints if ep.get("name")]
+            logging.info(f"Endpoints with names: {len(named_endpoints)}")
+
+            ready_endpoints = [
+                ep
+                for ep in named_endpoints
+                if ep.get("state", {}).get("ready") == "READY"
             ]
-        except Exception:
-            return []  # Silently fail, fall back to other methods
+            logging.info(f"Ready endpoints: {len(ready_endpoints)}")
+
+            # Log details about non-ready endpoints
+            non_ready = [ep for ep in named_endpoints if ep not in ready_endpoints]
+            if non_ready:
+                logging.info("Non-ready endpoints:")
+                for ep in non_ready:
+                    state = ep.get("state", {})
+                    logging.info(
+                        f"  - {ep.get('name')}: ready={state.get('ready')}, config_update={state.get('config_update')}"
+                    )
+
+            llm_endpoints = [ep for ep in ready_endpoints if self._is_llm_endpoint(ep)]
+            logging.info(f"LLM endpoints: {len(llm_endpoints)}")
+
+            # Log details about filtered out endpoints
+            non_llm = [ep for ep in ready_endpoints if ep not in llm_endpoints]
+            if non_llm:
+                logging.info("Non-LLM endpoints (filtered out):")
+                for ep in non_llm:
+                    endpoint_type = ep.get("endpoint_type", "N/A")
+                    task = ep.get("task", "N/A")
+                    logging.info(
+                        f"  - {ep.get('name')}: endpoint_type={endpoint_type}, task={task}"
+                    )
+
+            discovered_models = [
+                {"id": endpoint["name"], "name": endpoint["name"]}
+                for endpoint in llm_endpoints
+            ]
+
+            logging.info(
+                f"Successfully discovered {len(discovered_models)} LLM models:"
+            )
+            for model in discovered_models:
+                logging.info(f"  - {model['name']}")
+
+            return discovered_models
+
+        except requests.exceptions.RequestException as e:
+            logging.error(f"HTTP request failed during model discovery: {str(e)}")
+            if hasattr(e, "response") and e.response is not None:
+                logging.error(f"Response status: {e.response.status_code}")
+                logging.error(f"Response content: {e.response.text}")
+            return []
+        except json.JSONDecodeError as e:
+            logging.error(
+                f"Failed to parse JSON response during model discovery: {str(e)}"
+            )
+            return []
+        except Exception as e:
+            logging.error(
+                f"Unexpected error during model discovery: {str(e)}", exc_info=True
+            )
+            return []
 
     def _get_models(self) -> List[Dict[str, str]]:
-        """Get models using priority: custom -> auto-discovery -> defaults."""
-        # Check cache first
-        current_time = time.time()
-        if (
-            self._cached_models is not None
-            and current_time - self._cache_timestamp < self._cache_duration
-        ):
-            return self._cached_models
+        """Get models using priority: custom -> auto-discovery."""
+        try:
+            logging.info("Starting model retrieval process")
 
-        models = []
+            # Priority 1: Custom models from configuration
+            logging.debug("Checking for custom models from configuration")
+            custom_models = self._parse_custom_models()
+            if custom_models:
+                logging.info(
+                    f"Using {len(custom_models)} custom models from configuration:"
+                )
+                for model in custom_models:
+                    logging.info(f"  - {model['name']} (id: {model['id']})")
+                return custom_models
+            else:
+                logging.info("No custom models configured")
 
-        # Priority 1: Custom models from configuration
-        custom_models = self._parse_custom_models()
-        if custom_models:
-            models = custom_models
-        else:
             # Priority 2: Auto-discovered models
+            logging.info("Attempting auto-discovery of models")
             discovered_models = self._discover_models()
             if discovered_models:
-                models = discovered_models
+                logging.info(f"Using {len(discovered_models)} auto-discovered models")
+                return discovered_models
             else:
-                # Priority 3: Default fallback models
-                models = self.DEFAULT_MODELS.copy()
+                logging.warning("No models discovered through auto-discovery")
 
-        # Cache the result
-        self._cached_models = models
-        self._cache_timestamp = current_time
+            # No models available
+            logging.warning(
+                "No models available from any source (custom or auto-discovery)"
+            )
+            return []
 
-        return models
+        except Exception as e:
+            logging.error(f"Unexpected error in _get_models: {str(e)}", exc_info=True)
+            return []
 
     def _validate_messages(self, messages: List[Dict[str, Any]]) -> bool:
         """Validate message format."""
@@ -169,18 +281,29 @@ class Pipe:
 
     def pipes(self) -> List[Dict[str, Any]]:
         """Return available model configurations."""
-        current_time = int(time.time())
+        try:
+            logging.info("Open WebUI requesting available models")
+            current_time = int(time.time())
 
-        return [
-            {
-                "id": model["id"],
-                "name": model["name"],
-                "object": "model",
-                "created": current_time,
-                "owned_by": "databricks",
-            }
-            for model in self._get_models()
-        ]
+            models = self._get_models()
+
+            result = [
+                {
+                    "id": model["id"],
+                    "name": model["name"],
+                    "object": "model",
+                    "created": current_time,
+                    "owned_by": "Databricks",
+                }
+                for model in models
+            ]
+
+            logging.info(f"Returning {len(result)} models to Open WebUI")
+            return result
+
+        except Exception as e:
+            logging.error(f"Error in pipes() method: {str(e)}", exc_info=True)
+            return []
 
     def pipe(
         self, body: Dict[str, Any]
