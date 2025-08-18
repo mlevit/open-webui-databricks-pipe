@@ -5,7 +5,7 @@ A streamlined integration pipe that connects Open WebUI with Databricks LLM serv
 ## Features
 
 - 🚀 **Auto-discovery**: Automatically finds available LLM endpoints from your Databricks workspace
-- 🔍 **Smart filtering**: Only shows endpoints with LLM/agent tasks or foundation model APIs
+- 🔍 **Smart filtering**: Only shows endpoints with specific allowed task types
 - 🎯 **Simple naming**: Uses endpoint names exactly as they appear in Databricks
 - 🔄 **OpenAI compatible**: Provides OpenAI-style API responses for seamless integration
 - ⚡ **Streaming support**: Real-time response streaming for better user experience
@@ -46,8 +46,12 @@ Where:
 The pipe automatically discovers Databricks endpoints that are:
 
 - In `READY` state
-- Have `endpoint_type` of `FOUNDATION_MODEL_API`, OR
-- Have `task` field containing "llm" or "agent"
+- Have a `task` field matching one of the allowed endpoint types:
+  - `agent/v1/chat`
+  - `agent/v1/responses`
+  - `agent/v2/chat`
+  - `llm/v1/chat`
+  - `llm/v1/completions`
 
 ## Installation
 
