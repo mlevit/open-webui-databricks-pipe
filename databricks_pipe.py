@@ -67,15 +67,17 @@ class Pipe:
                 return []
 
             logging.debug(
-                f"Parsing custom models from configuration: {self.valves.custom_models.strip()}"
+                "Parsing custom models from configuration: %s",
+                self.valves.custom_models.strip(),
             )
 
             custom_models = json.loads(self.valves.custom_models.strip())
-            logging.debug(f"Parsed JSON successfully, type: {type(custom_models)}")
+            logging.debug("Parsed JSON successfully, type: %s", type(custom_models))
 
             if not isinstance(custom_models, list):
                 logging.warning(
-                    f"Custom models configuration is not a list, got {type(custom_models)}"
+                    "Custom models configuration is not a list, got %s",
+                    type(custom_models),
                 )
                 return []
 
@@ -89,26 +91,30 @@ class Pipe:
                         "name": str(model["name"]).strip(),
                     }
                     valid_models.append(valid_model)
-                    logging.debug(f"Valid custom model {i}: {valid_model}")
+                    logging.debug("Valid custom model %s: %s", i, valid_model)
                 else:
                     invalid_count += 1
                     logging.warning(
-                        f"Invalid custom model {i}: {model} (missing 'id' or 'name' keys)"
+                        "Invalid custom model %s: %s (missing 'id' or 'name' keys)",
+                        i,
+                        model,
                     )
 
             if invalid_count > 0:
-                logging.warning(f"Skipped {invalid_count} invalid custom model entries")
+                logging.warning(
+                    "Skipped %s invalid custom model entries", invalid_count
+                )
 
-            logging.info(f"Successfully parsed {len(valid_models)} custom models")
+            logging.info("Successfully parsed %s custom models", len(valid_models))
             return valid_models
 
         except json.JSONDecodeError as e:
-            logging.error(f"Failed to parse custom models JSON: {str(e)}")
-            logging.error(f"Invalid JSON string: {self.valves.custom_models}")
+            logging.error("Failed to parse custom models JSON: %s", str(e))
+            logging.error("Invalid JSON string: %s", self.valves.custom_models)
             return []
         except Exception as e:
             logging.error(
-                f"Unexpected error parsing custom models: {str(e)}", exc_info=True
+                "Unexpected error parsing custom models: %s", str(e), exc_info=True
             )
             return []
 
@@ -135,45 +141,46 @@ class Pipe:
             # Check configuration
             config_error = self._validate_config()
             if config_error:
-                logging.warning(f"Configuration validation failed: {config_error}")
+                logging.warning("Configuration validation failed: %s", config_error)
                 return []
 
             logging.info(
-                f"Starting model discovery for host: {self.valves.databricks_host.strip()}"
+                "Starting model discovery for host: %s",
+                self.valves.databricks_host.strip(),
             )
 
             url = f"https://{self.valves.databricks_host.strip()}/api/2.0/serving-endpoints"
             headers = self._get_headers()
 
-            logging.debug(f"Making request to: {url}")
+            logging.debug("Making request to: %s", url)
             logging.debug(
-                f"Request headers: {dict(headers, Authorization='Bearer ***')}"
+                "Request headers: %s", dict(headers, Authorization="Bearer ***")
             )  # Mask token
 
             response = requests.get(url, headers=headers)
-            logging.info(f"API Response status: {response.status_code}")
+            logging.info("API Response status: %s", response.status_code)
 
             response.raise_for_status()
 
             response_data = response.json()
             all_endpoints = response_data.get("endpoints", [])
-            logging.info(f"Found {len(all_endpoints)} total endpoints")
+            logging.info("Found %s total endpoints", len(all_endpoints))
 
             if not all_endpoints:
                 logging.warning("No endpoints found in API response")
-                logging.debug(f"Full API response: {response_data}")
+                logging.debug("Full API response: %s", response_data)
                 return []
 
             # Filter endpoints step by step with logging
             named_endpoints = [ep for ep in all_endpoints if ep.get("name")]
-            logging.info(f"Endpoints with names: {len(named_endpoints)}")
+            logging.info("Endpoints with names: %s", len(named_endpoints))
 
             ready_endpoints = [
                 ep
                 for ep in named_endpoints
                 if ep.get("state", {}).get("ready") == "READY"
             ]
-            logging.info(f"Ready endpoints: {len(ready_endpoints)}")
+            logging.info("Ready endpoints: %s", len(ready_endpoints))
 
             # Log details about non-ready endpoints
             non_ready = [ep for ep in named_endpoints if ep not in ready_endpoints]
@@ -182,11 +189,14 @@ class Pipe:
                 for ep in non_ready:
                     state = ep.get("state", {})
                     logging.info(
-                        f"  - {ep.get('name')}: ready={state.get('ready')}, config_update={state.get('config_update')}"
+                        "  - %s: ready=%s, config_update=%s",
+                        ep.get("name"),
+                        state.get("ready"),
+                        state.get("config_update"),
                     )
 
             llm_endpoints = [ep for ep in ready_endpoints if self._is_llm_endpoint(ep)]
-            logging.info(f"LLM endpoints: {len(llm_endpoints)}")
+            logging.info("LLM endpoints: %s", len(llm_endpoints))
 
             # Log details about filtered out endpoints
             non_llm = [ep for ep in ready_endpoints if ep not in llm_endpoints]
@@ -196,7 +206,10 @@ class Pipe:
                     endpoint_type = ep.get("endpoint_type", "N/A")
                     task = ep.get("task", "N/A")
                     logging.info(
-                        f"  - {ep.get('name')}: endpoint_type={endpoint_type}, task={task}"
+                        "  - %s: endpoint_type=%s, task=%s",
+                        ep.get("name"),
+                        endpoint_type,
+                        task,
                     )
 
             discovered_models = [
@@ -205,27 +218,27 @@ class Pipe:
             ]
 
             logging.info(
-                f"Successfully discovered {len(discovered_models)} LLM models:"
+                "Successfully discovered %s LLM models:", len(discovered_models)
             )
             for model in discovered_models:
-                logging.info(f"  - {model['name']}")
+                logging.info("  - %s", model["name"])
 
             return discovered_models
 
         except requests.exceptions.RequestException as e:
-            logging.error(f"HTTP request failed during model discovery: {str(e)}")
+            logging.error("HTTP request failed during model discovery: %s", str(e))
             if hasattr(e, "response") and e.response is not None:
-                logging.error(f"Response status: {e.response.status_code}")
-                logging.error(f"Response content: {e.response.text}")
+                logging.error("Response status: %s", e.response.status_code)
+                logging.error("Response content: %s", e.response.text)
             return []
         except json.JSONDecodeError as e:
             logging.error(
-                f"Failed to parse JSON response during model discovery: {str(e)}"
+                "Failed to parse JSON response during model discovery: %s", str(e)
             )
             return []
         except Exception as e:
             logging.error(
-                f"Unexpected error during model discovery: {str(e)}", exc_info=True
+                "Unexpected error during model discovery: %s", str(e), exc_info=True
             )
             return []
 
@@ -239,10 +252,10 @@ class Pipe:
             custom_models = self._parse_custom_models()
             if custom_models:
                 logging.info(
-                    f"Using {len(custom_models)} custom models from configuration:"
+                    "Using %s custom models from configuration:", len(custom_models)
                 )
                 for model in custom_models:
-                    logging.info(f"  - {model['name']} (id: {model['id']})")
+                    logging.info("  - %s (id: %s)", model["name"], model["id"])
                 return custom_models
             else:
                 logging.info("No custom models configured")
@@ -251,7 +264,7 @@ class Pipe:
             logging.info("Attempting auto-discovery of models")
             discovered_models = self._discover_models()
             if discovered_models:
-                logging.info(f"Using {len(discovered_models)} auto-discovered models")
+                logging.info("Using %s auto-discovered models", len(discovered_models))
                 return discovered_models
             else:
                 logging.warning("No models discovered through auto-discovery")
@@ -263,23 +276,8 @@ class Pipe:
             return []
 
         except Exception as e:
-            logging.error(f"Unexpected error in _get_models: {str(e)}", exc_info=True)
+            logging.error("Unexpected error in _get_models: %s", str(e), exc_info=True)
             return []
-
-    def _validate_messages(self, messages: List[Dict[str, Any]]) -> bool:
-        """Validate message format."""
-        if not isinstance(messages, list) or not messages:
-            return False
-
-        for msg in messages:
-            if not isinstance(msg, dict):
-                return False
-            if "role" not in msg or "content" not in msg:
-                return False
-            if msg["role"] not in ["system", "user", "assistant", "function"]:
-                return False
-
-        return True
 
     def pipes(self) -> List[Dict[str, Any]]:
         """Return available model configurations."""
@@ -300,21 +298,22 @@ class Pipe:
                 for model in models
             ]
 
-            logging.info(f"Returning {len(result)} models to Open WebUI")
+            logging.info("Returning %s models to Open WebUI", len(result))
             return result
 
         except Exception as e:
-            logging.error(f"Error in pipes() method: {str(e)}", exc_info=True)
+            logging.error("Error in pipes() method: %s", str(e), exc_info=True)
             return []
 
     def pipe(
-        self, body: Dict[str, Any]
+        self, body: Dict[str, Any], __user__: Dict[str, Any] = None
     ) -> Union[Dict[str, Any], Generator[str, None, None]]:
         """
         Main pipe method to handle both streaming and non-streaming requests.
 
         Args:
             body: Request body containing messages and parameters
+            __user__: User information from Open WebUI (optional)
 
         Returns:
             Response dictionary or generator for streaming responses
@@ -324,16 +323,8 @@ class Pipe:
         if config_error:
             return {"error": f"Configuration error: {config_error}"}
 
-        messages = body.get("messages", [])
-
-        # Validate messages
-        if not self._validate_messages(messages):
-            return {
-                "error": "Invalid messages format. Messages must be a non-empty list with 'role' and 'content' keys."
-            }
-
         # Prepare payload
-        payload = self._prepare_payload(body)
+        payload = self._prepare_payload(body, __user__)
         headers = self._get_headers()
 
         try:
@@ -344,7 +335,9 @@ class Pipe:
         except Exception as e:
             return {"error": f"Request failed: {str(e)}"}
 
-    def _prepare_payload(self, body: Dict[str, Any]) -> Dict[str, Any]:
+    def _prepare_payload(
+        self, body: Dict[str, Any], user: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
         """Prepare request payload from body."""
         # Start with essential parameters
         payload = {
@@ -365,6 +358,10 @@ class Pipe:
                 if param not in excluded_params and value is not None
             }
         )
+
+        # Add usage_context with user email if user information is available
+        if user and user.get("email"):
+            payload["usage_context"] = {"user_email": user.get("email")}
 
         return payload
 

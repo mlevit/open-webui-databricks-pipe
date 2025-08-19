@@ -1,5 +1,7 @@
 # Databricks LLM Pipe for Open WebUI
 
+[![GitHub Repository](https://img.shields.io/badge/GitHub-mlevit%2Fopen--webui--databricks--pipe-blue?logo=github)](https://github.com/mlevit/open-webui-databricks-pipe)
+
 A streamlined integration pipe that connects Open WebUI with Databricks LLM serving endpoints.
 
 ## Features
