@@ -2,13 +2,22 @@
 Title: Databricks LLM Pipe (Open WebUI)
 """
 
-import requests
+from datetime import datetime, timedelta
+from enum import Enum
+from pydantic import BaseModel, Field
+from typing import List, Union, Generator, Dict, Any, Optional, Literal
 import json
+import logging
+import requests
 import time
 import uuid
-import logging
-from typing import List, Union, Generator, Dict, Any
-from pydantic import BaseModel, Field
+
+
+class AuthType(Enum):
+    """Supported authentication types for Databricks."""
+
+    PAT = "Personal Access Token"
+    OAUTH = "OAuth"
 
 
 class Pipe:
@@ -23,17 +32,37 @@ class Pipe:
             default="your-workspace.cloud.databricks.com",
             description="Databricks host name (required)",
         )
-        databricks_token: str = Field(
-            default="dapixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-            description="Databricks authentication token (required)",
+
+        # Authentication configuration
+        authentication_method: Literal["Personal Access Token", "OAuth"] = Field(
+            default="Personal Access Token",
+            description="Authentication method",
+        )
+
+        # === PAT Authentication Fields (only required when authentication_method = Personal Access Token) ===
+        personal_access_token: str = Field(
+            default="",
+            description="",
+        )
+
+        # === OAuth Authentication Fields (only required when authentication_method = OAuth) ===
+        oauth_client_id: str = Field(
+            default="",
+            description="",
+        )
+        oauth_secret: str = Field(
+            default="",
+            description="",
+        )
+
+        # === Model Configuration ===
+        auto_discover_models: bool = Field(
+            default=True,
+            description="Automatically discover available LLM serving endpoints",
         )
         custom_models: str = Field(
             default="",
             description="Custom models (JSON format: [{'id': 'endpoint-name', 'name': 'Display Name'}]). Leave empty to use auto-discovery.",
-        )
-        auto_discover_models: bool = Field(
-            default=True,
-            description="Automatically discover available LLM serving endpoints",
         )
 
     # No constants needed for simplified approach
@@ -41,23 +70,112 @@ class Pipe:
     def __init__(self):
         self.name = ""
         self.valves = self.Valves()
+        # OAuth token management
+        self._access_token: Optional[str] = None
+        self._token_expires_at: Optional[datetime] = None
+        self._refresh_token: Optional[str] = None
 
     def _validate_config(self) -> Union[str, None]:
         """Validate configuration. Returns error message or None if valid."""
         if not self.valves.databricks_host.strip():
-            return "Databricks host is required"
+            return "Databricks host is required."
 
-        if not self.valves.databricks_token.strip():
-            return "Databricks token is required"
+        # Validate authentication method and required fields
+        if self.valves.authentication_method.strip() == AuthType.PAT.value:
+            if not self.valves.personal_access_token.strip():
+                return "Personal Access Token authentication selected: Please configure your Personal Access Token."
+        elif self.valves.authentication_method.strip() == AuthType.OAUTH.value:
+            if (
+                not self.valves.oauth_client_id.strip()
+                or not self.valves.oauth_secret.strip()
+            ):
+                return "OAuth authentication selected: Please configure oauth_client_id and oauth_secret."
+        else:
+            return f"Invalid authentication_method: {self.valves.authentication_method}. Must be 'Personal Access Token' or 'OAuth'."
 
         return None
 
-    def _get_headers(self) -> Dict[str, str]:
-        """Generate request headers."""
-        return {
-            "Authorization": f"Bearer {self.valves.databricks_token.strip()}",
-            "Content-Type": "application/json",
+    def _is_token_expired(self) -> bool:
+        """Check if the current OAuth token is expired or will expire soon."""
+        if not self._token_expires_at:
+            return True
+
+        # Consider token expired if it expires within the next 5 minutes
+        buffer_time = timedelta(minutes=5)
+        return datetime.utcnow() + buffer_time >= self._token_expires_at
+
+    def _request_token(self, data: Dict[str, str]) -> Union[str, None]:
+        """Make OAuth token request and process response."""
+        try:
+            url = f"https://{self.valves.databricks_host.strip()}/oidc/v1/token"
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+            response = requests.post(url, headers=headers, data=data)
+            response.raise_for_status()
+
+            token_data = response.json()
+            self._access_token = token_data.get("access_token")
+            expires_in = token_data.get("expires_in", 3600)
+            self._token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+
+            if refresh_token := token_data.get("refresh_token"):
+                self._refresh_token = refresh_token
+
+            return self._access_token
+        except Exception as e:
+            logging.error("OAuth token request failed: %s", str(e))
+            return None
+
+    def _get_oauth_token(self) -> Union[str, None]:
+        """Get OAuth access token for service principal."""
+        if self._access_token and not self._is_token_expired():
+            return self._access_token
+
+        data = {
+            "grant_type": "client_credentials",
+            "scope": "all-apis",
+            "client_id": self.valves.oauth_client_id.strip(),
+            "client_secret": self.valves.oauth_secret.strip(),
         }
+        return self._request_token(data)
+
+    def _refresh_oauth_token(self) -> Union[str, None]:
+        """Refresh OAuth token using refresh token."""
+        if not self._refresh_token:
+            return self._get_oauth_token()
+
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": self._refresh_token,
+            "client_id": self.valves.oauth_client_id.strip(),
+            "client_secret": self.valves.oauth_secret.strip(),
+        }
+
+        token = self._request_token(data)
+        if not token:
+            # Clear tokens and get new one
+            self._access_token = None
+            self._refresh_token = None
+            self._token_expires_at = None
+            return self._get_oauth_token()
+        return token
+
+    def _get_headers(self) -> Union[Dict[str, str], None]:
+        """Generate request headers based on configured authentication method."""
+        # Select token based on configured authentication method
+        if self.valves.authentication_method.strip() == AuthType.PAT.value:
+            token = self.valves.personal_access_token.strip()
+        else:  # OAuth
+            token = self._get_oauth_token()
+
+        return (
+            {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+            }
+            if token
+            else None
+        )
 
     def _parse_custom_models(self) -> List[Dict[str, str]]:
         """Parse custom models from valves configuration."""
@@ -151,6 +269,12 @@ class Pipe:
 
             url = f"https://{self.valves.databricks_host.strip()}/api/2.0/serving-endpoints"
             headers = self._get_headers()
+
+            if not headers:
+                logging.error(
+                    "Failed to get authentication headers for model discovery"
+                )
+                return []
 
             logging.debug("Making request to: %s", url)
             logging.debug(
@@ -326,6 +450,9 @@ class Pipe:
         # Prepare payload
         payload = self._prepare_payload(body, __user__)
         headers = self._get_headers()
+
+        if not headers:
+            return {"error": "Authentication failed: could not get valid headers"}
 
         try:
             if body.get("stream", False):

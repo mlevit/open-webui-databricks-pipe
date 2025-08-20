@@ -2,7 +2,7 @@
 
 [![GitHub Repository](https://img.shields.io/badge/GitHub-mlevit%2Fopen--webui--databricks--pipe-blue?logo=github)](https://github.com/mlevit/open-webui-databricks-pipe)
 
-A streamlined integration pipe that connects Open WebUI with Databricks LLM serving endpoints.
+A streamlined integration pipe that connects Open WebUI with Databricks LLM serving endpoints, supporting both Personal Access Token and OAuth authentication methods.
 
 ## Features
 
@@ -11,15 +11,33 @@ A streamlined integration pipe that connects Open WebUI with Databricks LLM serv
 - 🎯 **Simple naming**: Uses endpoint names exactly as they appear in Databricks
 - 🔄 **OpenAI compatible**: Provides OpenAI-style API responses for seamless integration
 - ⚡ **Streaming support**: Real-time response streaming for better user experience
+- 🔐 **Dual authentication**: Supports both Personal Access Token and OAuth (Service Principal) authentication
+- 🔄 **Token management**: Automatic OAuth token refresh with expiration handling
+- 📊 **Usage tracking**: Optional user email tracking for usage analytics
 
 ## Configuration
 
-Set these required parameters in Open WebUI:
+### Authentication Methods
+
+This pipe supports two authentication methods:
+
+#### Personal Access Token (Recommended for individual use)
 
 - **Databricks Host**: Your workspace URL (e.g., `your-workspace.cloud.databricks.com`)
-- **Databricks Token**: Your Databricks personal access token
-- **Custom Models** (optional): JSON array of custom models if you prefer manual configuration
+- **Authentication Method**: Select "Personal Access Token"
+- **Personal Access Token**: Your Databricks personal access token
+
+#### OAuth Service Principal (Recommended for production)
+
+- **Databricks Host**: Your workspace URL (e.g., `your-workspace.cloud.databricks.com`)
+- **Authentication Method**: Select "OAuth"
+- **OAuth Client ID**: Your service principal's client ID
+- **OAuth Secret**: Your service principal's secret
+
+### Model Configuration
+
 - **Auto-discover Models**: Enable/disable automatic endpoint discovery (default: enabled)
+- **Custom Models** (optional): JSON array of custom models if you prefer manual configuration
 
 ### Custom Models Format
 
@@ -57,14 +75,35 @@ The pipe automatically discovers Databricks endpoints that are:
 
 ## Installation
 
-1. Copy `databricks_pipe.py` to your Open WebUI pipes directory
-2. Configure your Databricks credentials
-3. The pipe will automatically discover and list available LLM endpoints
+### 1. Deploy the Pipe
 
-## Requirements
+Copy `databricks_pipe.py` to your Open WebUI pipes directory (typically `./data/pipes/`)
 
-- `requests`
-- `pydantic`
+### 2. Configure Authentication
+
+#### For Personal Access Token:
+
+1. Generate a Databricks Personal Access Token:
+   - Go to your Databricks workspace → User Settings → Developer → Access Tokens
+   - Click "Generate New Token"
+   - Copy the generated token
+
+#### For OAuth (Service Principal):
+
+1. Create a Service Principal in your Databricks workspace:
+   - Go to Admin Settings → Identity and Access → Service Principals
+   - Click "Add Service Principal"
+   - Note the Application ID (Client ID)
+2. Generate a secret for the Service Principal:
+   - Click on your Service Principal → Secrets → Generate Secret
+   - Copy the generated secret
+3. Grant necessary permissions to the Service Principal for accessing serving endpoints
+
+### 3. Configure in Open WebUI
+
+1. Navigate to Admin Panel → Settings → Pipelines
+2. Find "Databricks LLM Pipe" and configure the required fields
+3. Test the connection - available models should appear automatically
 
 ## License
 
