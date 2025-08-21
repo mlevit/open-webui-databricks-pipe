@@ -29,13 +29,13 @@ class Pipe:
 
         databricks_host: str = Field(
             default="your-workspace.cloud.databricks.com",
-            description="Databricks host name (required)",
+            description="Databricks host name",
         )
 
         # Authentication configuration
         authentication_method: Literal["Personal Access Token", "OAuth"] = Field(
             default="Personal Access Token",
-            description="Authentication method",
+            description="",
         )
 
         # === PAT Authentication Fields (only required when authentication_method = Personal Access Token) ===
@@ -233,21 +233,20 @@ class Pipe:
         return result
 
     def pipe(
-        self, body: Dict[str, Any], __user__: Dict[str, Any] = None
+        self, body: Dict[str, Any]
     ) -> Union[Dict[str, Any], Generator[str, None, None]]:
         """
         Main pipe method to handle both streaming and non-streaming requests.
 
         Args:
             body: Request body containing messages and parameters
-            __user__: User information from Open WebUI (optional)
 
         Returns:
             Response dictionary or generator for streaming responses
         """
 
         # Prepare payload
-        payload = self._prepare_payload(body, __user__)
+        payload = self._prepare_payload(body)
         headers = self._get_headers()
 
         if body.get("stream", False):
@@ -255,9 +254,7 @@ class Pipe:
         else:
             return self._non_stream_response(payload, headers)
 
-    def _prepare_payload(
-        self, body: Dict[str, Any], user: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+    def _prepare_payload(self, body: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare request payload from body."""
         # Start with essential parameters
         payload = {
@@ -278,10 +275,6 @@ class Pipe:
                 if param not in excluded_params and value is not None
             }
         )
-
-        # Add usage_context with user email if user information is available
-        if user and user.get("email"):
-            payload["usage_context"] = {"user_email": user.get("email")}
 
         return payload
 
