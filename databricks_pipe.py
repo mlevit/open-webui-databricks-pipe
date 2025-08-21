@@ -1,15 +1,18 @@
 """
-Title: Databricks LLM Pipe (Open WebUI)
+title: Databricks LLM Pipe
+author: @mlevit
+version: 1.0.0
 """
 
 from datetime import datetime, timedelta
 from enum import Enum
-from pydantic import BaseModel, Field
 from typing import List, Union, Generator, Dict, Any, Optional, Literal
 import json
-import requests
 import time
 import uuid
+
+from pydantic import BaseModel, Field
+import requests
 
 
 class AuthType(Enum):
