@@ -13,7 +13,6 @@ A streamlined integration pipe that connects Open WebUI with Databricks LLM serv
 - ⚡ **Streaming support**: Real-time response streaming for better user experience
 - 🔐 **Dual authentication**: Supports both Personal Access Token and OAuth (Service Principal) authentication
 - 🔄 **Token management**: Automatic OAuth token refresh with expiration handling
-- 📊 **Usage tracking**: Optional user email tracking for usage analytics
 
 ## Configuration
 
